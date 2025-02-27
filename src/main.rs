@@ -1,3 +1,5 @@
+// src/main.rs
+
 //! Main executable entry point.
 
 use anyhow::Result;
@@ -26,10 +28,7 @@ struct Args {
     url: Option<String>,
 
     /// Request body template with %user% and %pass% tokens (optional)
-    #[arg(
-        long,
-        help = "Body template for POST requests with tokens %user% and %pass%"
-    )]
+    #[arg(long, help = "Body template for POST requests with tokens %user% and %pass%")]
     body: Option<String>,
 
     /// Format for the request body: "json" or "form" (optional, defaults to json)
