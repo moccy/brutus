@@ -1,16 +1,26 @@
+//! Core brute-force functionality.
+//!
+//! This module provides functions for reading input files, running the diagonal
+//! brute-force search, and integrating a login strategy.
+
 mod strategy;
 pub use strategy::*;
 
+use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
+use log::info;
+use memmap2::Mmap;
+use rayon::prelude::*;
 use std::fs::File;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-
-use indicatif::{ProgressBar, ProgressStyle};
-use memmap2::Mmap;
-use rayon::prelude::*;
+use url::Url;
 
 /// Reads a file using memory mapping and returns a vector of lines with lossy UTF-8 conversion.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or mapped.
 pub fn read_lines_lossy(filename: &str) -> io::Result<Vec<String>> {
     let file = File::open(filename)?;
     let mmap = unsafe { Mmap::map(&file)? };
@@ -42,7 +52,10 @@ pub fn process_layer_cpu(
     });
 }
 
-/// Runs the diagonal brute-force search without allocating a huge visited matrix.
+/// Runs the diagonal brute-force search without building a huge visited matrix.
+///
+/// # Errors
+/// Returns an error if any IO operation fails.
 pub fn diagonal_bruteforce(
     usernames: &[&str],
     passwords: &[&str],
@@ -60,9 +73,11 @@ pub fn diagonal_bruteforce(
     let total_attempts = (n as u64) * (m as u64);
     let pb = ProgressBar::new(total_attempts);
     pb.set_style(
-        ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-            .unwrap()
-            .progress_chars("##-"),
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+        )
+        .unwrap()
+        .progress_chars("##-"),
     );
 
     let found = AtomicBool::new(false);
@@ -88,26 +103,50 @@ pub fn diagonal_bruteforce(
                 .build()
                 .unwrap();
             pool.install(|| {
-                process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair, login_attempt)
+                process_layer_cpu(
+                    &layer,
+                    usernames,
+                    passwords,
+                    &pb,
+                    &found,
+                    &success_pair,
+                    login_attempt,
+                )
             });
         } else {
-            process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair, login_attempt);
+            process_layer_cpu(
+                &layer,
+                usernames,
+                passwords,
+                &pb,
+                &found,
+                &success_pair,
+                login_attempt,
+            );
         }
     }
 
     pb.finish_and_clear();
     let lock = success_pair.lock().unwrap();
     if let Some((x, y)) = *lock {
-        println!("SUCCESS FOUND! Username: '{}', Password: '{}'", usernames[x], passwords[y]);
+        info!(
+            "SUCCESS FOUND! Username: '{}', Password: '{}'",
+            usernames[x], passwords[y]
+        );
     } else {
-        println!("No success found after exhausting the search space.");
+        info!("No success found after exhausting the search space.");
     }
     Ok(())
 }
 
 /// Runs the brute-force search.
-/// If a target URL is provided, tokens in the URL and/or body are replaced based on the chosen format.
+///
+/// If a target URL is provided, the URL is validated. If a body template is provided,
+/// then the format option is used to select the appropriate POST strategy ("json" or "form").
 /// If no target URL is provided, a dummy strategy is used.
+///
+/// # Errors
+/// Returns an error if input files cannot be read or the URL is invalid.
 pub fn run_bruteforce(
     usernames_file: &str,
     passwords_file: &str,
@@ -115,29 +154,39 @@ pub fn run_bruteforce(
     target_url: Option<&str>,
     target_body: Option<&str>,
     target_format: Option<&str>,
-) -> io::Result<()> {
+) -> Result<()> {
     let usernames_vec = read_lines_lossy(usernames_file)?;
     let passwords_vec = read_lines_lossy(passwords_file)?;
 
     let usernames: Vec<&str> = usernames_vec.iter().map(|s| s.as_str()).collect();
     let passwords: Vec<&str> = passwords_vec.iter().map(|s| s.as_str()).collect();
 
-    println!("Starting diagonal brute-force with UTF-8 normalization...");
-    println!("Loaded {} username(s) from '{}'", usernames.len(), usernames_file);
-    println!("Loaded {} password(s) from '{}'", passwords.len(), passwords_file);
-
+    info!("Starting diagonal brute-force with UTF-8 normalization...");
+    info!(
+        "Loaded {} username(s) from '{}'",
+        usernames.len(),
+        usernames_file
+    );
+    info!(
+        "Loaded {} password(s) from '{}'",
+        passwords.len(),
+        passwords_file
+    );
     if threads == 0 {
-        println!("Using Rayon default thread count (# of CPU cores).");
+        info!("Using Rayon default thread count (# of CPU cores).");
     } else {
-        println!("Using {} thread(s).", threads);
+        info!("Using {} thread(s).", threads);
     }
 
+    // Validate URL if provided.
     let strategy: Box<dyn LoginStrategy> = if let Some(url) = target_url {
+        if Url::parse(url).is_err() {
+            anyhow::bail!("Invalid URL provided: {}", url);
+        }
         if let Some(body) = target_body {
             match target_format {
                 Some("form") => Box::new(FormStrategy::new(url, body)),
-                Some("json") => Box::new(JsonStrategy::new(url, body)),
-                _ => Box::new(JsonStrategy::new(url, body)), // default to JSON
+                Some("json") | _ => Box::new(JsonStrategy::new(url, body)),
             }
         } else {
             Box::new(GetStrategy::new(url))
@@ -146,5 +195,6 @@ pub fn run_bruteforce(
         Box::new(DummyStrategy::new())
     };
 
-    diagonal_bruteforce(&usernames, &passwords, threads, &*strategy)
+    diagonal_bruteforce(&usernames, &passwords, threads, &*strategy)?;
+    Ok(())
 }
