@@ -1,5 +1,3 @@
-// src/lib.rs
-
 mod strategy;
 pub use strategy::*;
 
@@ -8,21 +6,20 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
+use rayon::prelude::*;
 
-/// Reads the file via memory mapping and returns a Vec<String> with a lossy conversion.
+/// Reads a file using memory mapping and returns a vector of lines with lossy UTF-8 conversion.
 pub fn read_lines_lossy(filename: &str) -> io::Result<Vec<String>> {
     let file = File::open(filename)?;
     let mmap = unsafe { Mmap::map(&file)? };
     let content = String::from_utf8_lossy(&mmap);
-    let lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+    let lines = content.lines().map(|line| line.to_string()).collect();
     Ok(lines)
 }
 
-/// Process a diagonal (wavefront) layer using CPU parallelism.
-/// The provided `login_attempt` strategy is called for each username/password pair.
+/// Processes a single diagonal (wavefront) layer in parallel, using the provided login strategy.
 pub fn process_layer_cpu(
     layer: &[(usize, usize)],
     usernames: &[&str],
@@ -45,8 +42,7 @@ pub fn process_layer_cpu(
     });
 }
 
-/// Diagonal brute-force algorithm that avoids building an n×m visited matrix.
-/// Iterates over diagonals (wavefronts) where d = i + j.
+/// Runs the diagonal brute-force search without allocating a huge visited matrix.
 pub fn diagonal_bruteforce(
     usernames: &[&str],
     passwords: &[&str],
@@ -76,7 +72,6 @@ pub fn diagonal_bruteforce(
         if found.load(Ordering::Relaxed) {
             break;
         }
-
         let mut layer = Vec::new();
         let start = if d >= m { d - m + 1 } else { 0 };
         let end = if d < n { d } else { n - 1 };
@@ -93,26 +88,10 @@ pub fn diagonal_bruteforce(
                 .build()
                 .unwrap();
             pool.install(|| {
-                process_layer_cpu(
-                    &layer,
-                    usernames,
-                    passwords,
-                    &pb,
-                    &found,
-                    &success_pair,
-                    login_attempt,
-                )
+                process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair, login_attempt)
             });
         } else {
-            process_layer_cpu(
-                &layer,
-                usernames,
-                passwords,
-                &pb,
-                &found,
-                &success_pair,
-                login_attempt,
-            );
+            process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair, login_attempt);
         }
     }
 
@@ -126,16 +105,16 @@ pub fn diagonal_bruteforce(
     Ok(())
 }
 
-/// Runs the brute-force search.  
-/// If `target_url` is provided, the `%user%` and `%pass%` tokens in the URL or body are replaced.
-/// If `target_body` is provided, a POST request is made; otherwise, a GET request is made.
-/// If neither is provided, a dummy strategy is used.
+/// Runs the brute-force search.
+/// If a target URL is provided, tokens in the URL and/or body are replaced based on the chosen format.
+/// If no target URL is provided, a dummy strategy is used.
 pub fn run_bruteforce(
     usernames_file: &str,
     passwords_file: &str,
     threads: usize,
     target_url: Option<&str>,
     target_body: Option<&str>,
+    target_format: Option<&str>,
 ) -> io::Result<()> {
     let usernames_vec = read_lines_lossy(usernames_file)?;
     let passwords_vec = read_lines_lossy(passwords_file)?;
@@ -155,7 +134,11 @@ pub fn run_bruteforce(
 
     let strategy: Box<dyn LoginStrategy> = if let Some(url) = target_url {
         if let Some(body) = target_body {
-            Box::new(PostStrategy::new(url, body))
+            match target_format {
+                Some("form") => Box::new(FormStrategy::new(url, body)),
+                Some("json") => Box::new(JsonStrategy::new(url, body)),
+                _ => Box::new(JsonStrategy::new(url, body)), // default to JSON
+            }
         } else {
             Box::new(GetStrategy::new(url))
         }

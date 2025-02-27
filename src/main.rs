@@ -1,5 +1,3 @@
-// src/main.rs
-
 use brutus::run_bruteforce;
 use clap::Parser;
 
@@ -22,9 +20,13 @@ struct Args {
     #[arg(long)]
     url: Option<String>,
 
-    /// Request body template with %user% and %pass% tokens for POST requests (optional)
+    /// Request body template with %user% and %pass% tokens (optional)
     #[arg(long)]
     body: Option<String>,
+
+    /// Format for the request body: "json" or "form" (optional, defaults to "json")
+    #[arg(long)]
+    format: Option<String>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -35,5 +37,6 @@ fn main() -> std::io::Result<()> {
         args.threads,
         args.url.as_deref(),
         args.body.as_deref(),
+        args.format.as_deref(),
     )
 }
