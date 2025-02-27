@@ -2,42 +2,47 @@ use std::collections::VecDeque;
 
 // Simulated function to check username/password
 fn attempt_login(username: &str, password: &str) -> bool {
-    println!("Trying: {} / {}", username, password);
-    // Replace this with actual login logic (return true if successful)
-    false
+    println!("{}:{}", username, password);
+    false // Replace with actual login logic
 }
 
-// Expanding wavefront generation
+// BFS-style wavefront brute-force attack
 fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str]) {
     let size = usernames.len().max(passwords.len());
     let mut queue = VecDeque::new();
-
-    // Start with the first element (0,0)
+    
+    // Start at (0,0)
     queue.push_back((0, 0));
 
-    let mut step = 1;
+    // Track visited positions
+    let mut visited = vec![vec![false; size]; size];
+    visited[0][0] = true;
 
     while let Some((x, y)) = queue.pop_front() {
         let username = usernames.get(x);
         let password = passwords.get(y);
 
         if let (Some(u), Some(p)) = (username, password) {
-            print!("({},{}) ", x, y);
+            print!("Trying ({},{}): ", x, y);
             if attempt_login(u, p) {
                 println!("Success! Username: {}, Password: {}", u, p);
                 return; // Stop on success
             }
         }
 
-        // Generate next wavefront
-        for i in 0..=step {
-            let j = step - i;
-            if i < size && j < size {
-                queue.push_back((i, j));
+        // Expand to next layer (wavefront)
+        let neighbors = [
+            (x + 1, y), // Right
+            (x, y + 1), // Down
+            (x + 1, y + 1), // Diagonal
+        ];
+
+        for &(nx, ny) in &neighbors {
+            if nx < size && ny < size && !visited[nx][ny] {
+                queue.push_back((nx, ny));
+                visited[nx][ny] = true;
             }
         }
-
-        step += 1; // Expand the wavefront step
     }
 }
 
