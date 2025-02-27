@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use clap::Parser;
 use rayon::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle};
 
 /// CLI arguments for wavefront BFS brute-forcing with UTF-8 normalization.
 #[derive(Parser, Debug)]
@@ -27,27 +28,24 @@ struct Args {
 /// In a real environment, you'd make a network request here.
 /// We'll just print and return `false` for demo.
 fn attempt_login(username: &str, password: &str) -> bool {
-    println!("Trying: {}:{}", username, password);
+    // Log: We also show the attempt here, with (username, password).
+    // println!("Trying: {}:{}", username, password);
+
     false
 }
+
 
 /// Reads a file line by line and normalizes each line to valid UTF-8 using
 /// `String::from_utf8_lossy()`. If the file contains invalid UTF-8 byte sequences,
 /// they will be replaced with the Unicode replacement character (�).
 ///
-/// - Each line is trimmed of the trailing newline. 
+/// - Each line is trimmed of the trailing newline.
 /// - The result is guaranteed to be valid UTF-8 for each line.
 fn read_lines_normalized(filename: &str) -> io::Result<Vec<String>> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
 
     let mut lines = Vec::new();
-    // We'll iterate over the raw byte lines ourselves:
-    // 1) Read until newline,
-    // 2) Convert to UTF-8 with from_utf8_lossy,
-    // 3) Store in the vector.
-
-    // Option A) Use `BufRead::read_until(b'\n', ...)` in a loop
     let mut buf = Vec::new();
     let mut handle = reader;
 
@@ -74,9 +72,11 @@ fn read_lines_normalized(filename: &str) -> io::Result<Vec<String>> {
     Ok(lines)
 }
 
-/// Wavefront BFS from (0,0) outward (usernames x passwords). 
-/// Each BFS "layer" is processed in parallel. 
+/// Wavefront BFS from (0,0) outward (usernames x passwords).
+/// Each BFS "layer" is processed in parallel.
 /// We stop on the first successful `attempt_login`.
+/// 
+/// Now includes an Indicatif progress bar for attempts and logs `(x, y)`.
 fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str], threads: usize) {
     let n = usernames.len();
     let m = passwords.len();
@@ -113,6 +113,22 @@ fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str], threads: usize) 
         None
     };
 
+    // ---------------------------
+    // Setup an Indicatif progress bar
+    // The total number of possible attempts is n * m (each username + password pair).
+    // BFS will eventually cover all pairs if no success is found first.
+    let total_attempts = (n as u64) * (m as u64);
+    let pb = ProgressBar::new(total_attempts);
+
+    // You can customize the style as you wish:
+    pb.set_style(
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+        )
+        .unwrap()
+        .progress_chars("##-"),
+    );
+
     // BFS wavefront
     while !queue.is_empty() && !found.load(Ordering::Relaxed) {
         // Extract this BFS "layer"
@@ -131,7 +147,15 @@ fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str], threads: usize) 
                 if found.load(Ordering::Relaxed) {
                     return;
                 }
-                // Attempt
+
+                // Log (x, y), then do the attempt
+                // (You can remove this line if you find it too verbose.)
+                //println!("Trying ({}, {}): {}:{}", x, y, usernames[x], passwords[y]);
+
+                // Increment progress bar by 1 attempt
+                pb.inc(1);
+
+                // Actually attempt the login
                 if attempt_login(usernames[x], passwords[y]) {
                     found.store(true, Ordering::Relaxed);
                     let mut lock = success_pair.lock().unwrap();
@@ -140,6 +164,7 @@ fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str], threads: usize) 
             });
         };
 
+        // Run either on custom or global pool
         if let Some(ref pool) = maybe_pool {
             pool.install(process_layer);
         } else {
@@ -163,7 +188,10 @@ fn wavefront_bruteforce(usernames: &[&str], passwords: &[&str], threads: usize) 
         }
     }
 
-    // Print result
+    // Finish the progress bar
+    pb.finish_and_clear();
+
+    // Print final result
     let lock = success_pair.lock().unwrap();
     if let Some((x, y)) = *lock {
         println!(
