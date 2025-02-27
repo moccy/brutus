@@ -1,5 +1,10 @@
+// src/lib.rs
+
+mod strategy;
+pub use strategy::*;
+
 use std::fs::File;
-use std::io::{self};
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -7,24 +12,17 @@ use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 
-/// In a real environment, you'd perform a network request or heavy hash calculation here.
-/// For demo purposes, this always returns false.
-pub fn attempt_login(username: &str, password: &str) -> bool {
-    false
-}
-
 /// Reads the file via memory mapping and returns a Vec<String> with a lossy conversion.
-/// This handles both ASCII and non‑UTF‑8 files.
 pub fn read_lines_lossy(filename: &str) -> io::Result<Vec<String>> {
     let file = File::open(filename)?;
     let mmap = unsafe { Mmap::map(&file)? };
-    // Use from_utf8_lossy: if the file is valid ASCII (or UTF‑8) it borrows, otherwise it allocates.
     let content = String::from_utf8_lossy(&mmap);
     let lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
     Ok(lines)
 }
 
-/// Process a wavefront layer using CPU parallelism.
+/// Process a diagonal (wavefront) layer using CPU parallelism.
+/// The provided `login_attempt` strategy is called for each username/password pair.
 pub fn process_layer_cpu(
     layer: &[(usize, usize)],
     usernames: &[&str],
@@ -32,13 +30,14 @@ pub fn process_layer_cpu(
     pb: &ProgressBar,
     found: &AtomicBool,
     success_pair: &Mutex<Option<(usize, usize)>>,
+    login_attempt: &dyn LoginStrategy,
 ) {
     layer.par_iter().for_each(|&(x, y)| {
         if found.load(Ordering::Relaxed) {
             return;
         }
         pb.inc(1);
-        if attempt_login(usernames[x], passwords[y]) {
+        if login_attempt.attempt(usernames[x], passwords[y]) {
             found.store(true, Ordering::Relaxed);
             let mut lock = success_pair.lock().unwrap();
             *lock = Some((x, y));
@@ -47,11 +46,12 @@ pub fn process_layer_cpu(
 }
 
 /// Diagonal brute-force algorithm that avoids building an n×m visited matrix.
-/// It iterates over diagonals (wavefronts) where d = i + j.
+/// Iterates over diagonals (wavefronts) where d = i + j.
 pub fn diagonal_bruteforce(
     usernames: &[&str],
     passwords: &[&str],
     threads: usize,
+    login_attempt: &dyn LoginStrategy,
 ) -> io::Result<()> {
     let n = usernames.len();
     let m = passwords.len();
@@ -72,13 +72,11 @@ pub fn diagonal_bruteforce(
     let found = AtomicBool::new(false);
     let success_pair = Mutex::new(None);
 
-    // Instead of building a huge visited matrix, iterate over diagonals.
     for d in 0..=(n + m - 2) {
         if found.load(Ordering::Relaxed) {
             break;
         }
 
-        // Generate all (i, j) pairs such that i + j = d.
         let mut layer = Vec::new();
         let start = if d >= m { d - m + 1 } else { 0 };
         let end = if d < n { d } else { n - 1 };
@@ -89,15 +87,32 @@ pub fn diagonal_bruteforce(
             }
         }
 
-        // Process the current diagonal layer in parallel.
         if threads > 0 {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build()
                 .unwrap();
-            pool.install(|| process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair));
+            pool.install(|| {
+                process_layer_cpu(
+                    &layer,
+                    usernames,
+                    passwords,
+                    &pb,
+                    &found,
+                    &success_pair,
+                    login_attempt,
+                )
+            });
         } else {
-            process_layer_cpu(&layer, usernames, passwords, &pb, &found, &success_pair);
+            process_layer_cpu(
+                &layer,
+                usernames,
+                passwords,
+                &pb,
+                &found,
+                &success_pair,
+                login_attempt,
+            );
         }
     }
 
@@ -111,13 +126,20 @@ pub fn diagonal_bruteforce(
     Ok(())
 }
 
-/// The main entry point for the library.
-/// It reads the input files, prints load information, and kicks off the brute-force search.
-pub fn run_bruteforce(usernames_file: &str, passwords_file: &str, threads: usize) -> io::Result<()> {
+/// Runs the brute-force search.  
+/// If `target_url` is provided, the `%user%` and `%pass%` tokens in the URL or body are replaced.
+/// If `target_body` is provided, a POST request is made; otherwise, a GET request is made.
+/// If neither is provided, a dummy strategy is used.
+pub fn run_bruteforce(
+    usernames_file: &str,
+    passwords_file: &str,
+    threads: usize,
+    target_url: Option<&str>,
+    target_body: Option<&str>,
+) -> io::Result<()> {
     let usernames_vec = read_lines_lossy(usernames_file)?;
     let passwords_vec = read_lines_lossy(passwords_file)?;
 
-    // Convert to slices for random access in the search.
     let usernames: Vec<&str> = usernames_vec.iter().map(|s| s.as_str()).collect();
     let passwords: Vec<&str> = passwords_vec.iter().map(|s| s.as_str()).collect();
 
@@ -131,5 +153,15 @@ pub fn run_bruteforce(usernames_file: &str, passwords_file: &str, threads: usize
         println!("Using {} thread(s).", threads);
     }
 
-    diagonal_bruteforce(&usernames, &passwords, threads)
+    let strategy: Box<dyn LoginStrategy> = if let Some(url) = target_url {
+        if let Some(body) = target_body {
+            Box::new(PostStrategy::new(url, body))
+        } else {
+            Box::new(GetStrategy::new(url))
+        }
+    } else {
+        Box::new(DummyStrategy::new())
+    };
+
+    diagonal_bruteforce(&usernames, &passwords, threads, &*strategy)
 }
