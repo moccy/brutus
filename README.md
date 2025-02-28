@@ -4,6 +4,10 @@
 
 Note that this is an early version (v0.1.0) and is still under active development. Use at your own risk, I'm just creating this for a bit of fun, it isn't designed for any serious use-cases.
 
+## Legal Considerations
+
+*WARNING:* Use this tool only in environments where you have explicit authorization to perform brute-force testing and it would be considered legal. Unauthorized access use of this on systems is illegal.
+
 ## Features
 
 - **Diagonal Brute-Force Algorithm:**  
@@ -102,10 +106,6 @@ The design follows a modular architecture with clear separation of concerns. To 
 
 - *Updating UI Components:*
     UI-specific code (like progress bars) is isolated in src/ui.rs.
- 
-## Ethical Considerations
-
-*WARNING:* Use this tool only in environments where you have explicit authorization to perform brute-force testing. Unauthorized access to systems is illegal.
 
 ## License
 
