@@ -2,7 +2,7 @@
 
 **Brutus** is an experimental password brute-forcing tool written in Rust. It uses a diagonal (wavefront) search strategy combined with parallel processing to efficiently explore username and password combinations. This tool supports multiple HTTP-based login strategies (GET, JSON POST, and Form POST) via a flexible strategy pattern. 
 
-Note that this is an early version (v0.1.0) and is still under active development.
+Note that this is an early version (v0.1.0) and is still under active development. Use at your own risk, I'm just creating this for a bit of fun, it isn't designed for any serious use-cases.
 
 ## Features
 
