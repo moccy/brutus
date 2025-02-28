@@ -6,7 +6,7 @@ Note that this is an early version (v0.1.0) and is still under active developmen
 
 ## Legal Considerations
 
-*WARNING:* Use this tool only in environments where you have explicit authorization to perform brute-force testing and it would be considered legal. Unauthorized access use of this on systems is illegal.
+*WARNING:* Use this tool only in environments where you have explicit authorization to perform brute-force testing and it would be considered legal. Unauthorized use of this on systems is illegal.
 
 ## Features
 
