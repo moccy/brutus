@@ -1,15 +1,13 @@
-// src/strategy/form.rs
-
 use super::LoginStrategy;
 use log::{debug, error};
 use reqwest::blocking::Client;
 use reqwest::StatusCode;
 use std::time::Duration;
 
-/// Returns a reqwest blocking client with a 10-second timeout.
 fn default_client() -> Client {
     Client::builder()
         .timeout(Duration::from_secs(10))
+        .cookie_store(true)
         .build()
         .expect("Failed to build HTTP client")
 }

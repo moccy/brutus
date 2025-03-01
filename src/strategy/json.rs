@@ -10,6 +10,7 @@ use std::time::Duration;
 fn default_client() -> Client {
     Client::builder()
         .timeout(Duration::from_secs(10))
+        .cookie_store(true)
         .build()
         .expect("Failed to build HTTP client")
 }
